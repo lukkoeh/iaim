@@ -115,102 +115,98 @@ if __name__ == "__main__":
     chunks = text_splitter.create_documents([processed_transcript])
     print(f"📊 Transkript in {len(chunks)} Chunks aufgeteilt")
 
-    # # Optional: Bereinige die Chunks, um Sprecher zu extrahieren
-    # print("\n🧹 Bereinige Chunks und extrahiere Sprecher...")
-    # clean_chunks = []
-    # speaker_stats = {}
+    # Optional: Bereinige die Chunks, um Sprecher zu extrahieren
+    print("\n🧹 Bereinige Chunks und extrahiere Sprecher...")
+    clean_chunks = []
+    speaker_stats = {}
     
-    # for i, chunk in enumerate(chunks):
-    #     print(f"🔄 Bereinige Chunk {i+1}/{len(chunks)} und fasse ihn zusammen (1. Zusammenfassung)")
-    #     text = chunk.page_content
-    #     # Extrahiere den Sprecher aus dem Text (falls vorhanden)
-    #     speaker_match = re.search(r"\[SPEAKER:([A-Z]{1,3})\]", text)
-    #     speaker = speaker_match.group(1) if speaker_match else "UNKNOWN"
+    for i, chunk in enumerate(chunks):
+        print(f"🔄 Bereinige Chunk {i+1}/{len(chunks)} und fasse ihn zusammen (1. Zusammenfassung)")
+        text = chunk.page_content
+        # Extrahiere den Sprecher aus dem Text (falls vorhanden)
+        speaker_match = re.search(r"\[SPEAKER:([A-Z]{1,3})\]", text)
+        speaker = speaker_match.group(1) if speaker_match else "UNKNOWN"
         
-    #     # Zähle Sprecher für Statistik
-    #     if speaker in speaker_stats:
-    #         speaker_stats[speaker] += 1
-    #     else:
-    #         speaker_stats[speaker] = 1
+        # Zähle Sprecher für Statistik
+        if speaker in speaker_stats:
+            speaker_stats[speaker] += 1
+        else:
+            speaker_stats[speaker] = 1
 
-    #     # Entferne die Sprechermarkierung aus dem Text
-    #     clean_text = re.sub(r"\[SPEAKER:[A-Z]{1,3}\]", "", text).strip()
+        # Entferne die Sprechermarkierung aus dem Text
+        clean_text = re.sub(r"\[SPEAKER:[A-Z]{1,3}\]", "", text).strip()
         
-    #     # Bereinige den Text mittels OpenAI um unnötige Zeichen und Füllwörter
-    #     clean_text = openai_client.chat.completions.create(
-    #         model="gpt-4o",
-    #         messages=[
-    #             {"role": "system", "content": cleaning_prompt},
-    #             {"role": "user", "content": clean_text},
-    #         ],
-    #     )
-    #     clean_text = clean_text.choices[0].message.content
-    #     # Erzeuge eine erste Zusammenfassung jedes Chunks und füge es einfach an den Text mit \n\n zusammen
-    #     summary = openai_client.chat.completions.create(
-    #         model="gpt-4o",
-    #         messages=[
-    #             {"role": "system", "content": summary_prompt},
-    #             {"role": "user", "content": clean_text},
-    #         ],
-    #     )
-    #     summary = summary.choices[0].message.content
-    #     clean_text = f"{clean_text}\n\n{summary}"
+        # Bereinige den Text mittels OpenAI um unnötige Zeichen und Füllwörter
+        clean_text = openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": cleaning_prompt},
+                {"role": "user", "content": clean_text},
+            ],
+        )
+        clean_text = clean_text.choices[0].message.content
+        # Erzeuge eine erste Zusammenfassung jedes Chunks und füge es einfach an den Text mit \n\n zusammen
+        summary = openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": summary_prompt},
+                {"role": "user", "content": clean_text},
+            ],
+        )
+        summary = summary.choices[0].message.content
+        clean_text = f"{clean_text}\n\n{summary}"
 
-    #     if clean_text:  # Ignoriere leere Chunks
-    #         clean_chunks.append(clean_text)
-    #         if i < 3 or i >= len(chunks) - 3:  # Zeige die ersten und letzten 3 Chunks
-    #             print(f"📄 Chunk {i+1} (Sprecher: {speaker}): {clean_text[:50]}...")
+        if clean_text:  # Ignoriere leere Chunks
+            clean_chunks.append(clean_text)
+            if i < 3 or i >= len(chunks) - 3:  # Zeige die ersten und letzten 3 Chunks
+                print(f"📄 Chunk {i+1} (Sprecher: {speaker}): {clean_text[:50]}...")
 
-    # print(f"\n✅ Bereinigte Chunks: {len(clean_chunks)}")
-    # print("👥 Sprecher-Statistik:")
-    # for speaker, count in speaker_stats.items():
-    #     print(f"  👤 {speaker}: {count} Chunks")
+    print(f"\n✅ Bereinigte Chunks: {len(clean_chunks)}")
+    print("👥 Sprecher-Statistik:")
+    for speaker, count in speaker_stats.items():
+        print(f"  👤 {speaker}: {count} Chunks")
 
-    # # clean_chunks ist nun eine Liste von Chunks mit Sprecher und Text
-    # # Throw the chunks into the chroma db
-    # print("\n" + "-" * 50)
-    # print(f"💾 Füge {len(clean_chunks)} Chunks zur ChromaDB hinzu...")
-    # collection.add(
-    #     ids=[str(i) for i in range(len(clean_chunks))],
-    #     documents=clean_chunks,
-    # )
-    # print("✅ Chunks erfolgreich zur ChromaDB hinzugefügt")
-    # print(f"📊 Anzahl der Dokumente in der Kollektion: {collection.count()}")
-    # print("=" * 50)
-    # print("🎉 Transkriptanalyse abgeschlossen")
-    # print("=" * 50)
+    # clean_chunks ist nun eine Liste von Chunks mit Sprecher und Text
+    # Throw the chunks into the chroma db
+    print("\n" + "-" * 50)
+    print(f"💾 Füge {len(clean_chunks)} Chunks zur ChromaDB hinzu...")
+    collection.add(
+        ids=[str(i) for i in range(len(clean_chunks))],
+        documents=clean_chunks,
+    )
+    print("✅ Chunks erfolgreich zur ChromaDB hinzugefügt")
+    print(f"📊 Anzahl der Dokumente in der Kollektion: {collection.count()}")
+    print("=" * 50)
+    print("🎉 Transkriptanalyse abgeschlossen")
+    print("=" * 50)
     
-    # extracted_information = []
+    extracted_information = []
     
-    # # cycle through the questions and the chunks and do a rag based extraction of information
-    # for q, question in enumerate(questions_df["question"], 1):
-    #     print(f"❓ Frage: {question} (Frage {q}/{len(questions_df)})")
-    #     # get the chunks that are relevant to the question
-    #     relevant_chunks = collection.query(
-    #         query_texts=[question],
-    #         n_results=3
-    #     )
+    # cycle through the questions and the chunks and do a rag based extraction of information
+    for q, question in enumerate(questions_df["question"], 1):
+        print(f"❓ Frage: {question} (Frage {q}/{len(questions_df)})")
+        # get the chunks that are relevant to the question
+        relevant_chunks = collection.query(
+            query_texts=[question],
+            n_results=3
+        )
         
-    #     # Verwende die relevanten Chunks für die Extraktion
-    #     chunk_texts = relevant_chunks["documents"][0]
-    #     response = openai_client.chat.completions.create(
-    #         model="gpt-4o",
-    #         messages=[
-    #             {"role": "system", "content": extraction_system_prompt},
-    #             {"role": "user", "content": extraction_prompt.format(interview_chunk="\n".join(chunk_texts), interview_question=question, relevant_chunks=chunk_texts)},
-    #         ],
-    #     )
-    #     response = response.choices[0].message.content
-    #     extracted_information.append({"question": question, "interpretation": response})
+        # Verwende die relevanten Chunks für die Extraktion
+        chunk_texts = relevant_chunks["documents"][0]
+        response = openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": extraction_system_prompt},
+                {"role": "user", "content": extraction_prompt.format(interview_chunk="\n".join(chunk_texts), interview_question=question, relevant_chunks=chunk_texts)},
+            ],
+        )
+        response = response.choices[0].message.content
+        extracted_information.append({"question": question, "interpretation": response})
             
-    # # save the extracted information to a json file
-    # with open("extracted_information.json", "w", encoding="utf-8") as f:
-    #     json.dump(extracted_information, f, ensure_ascii=False)
-    #     print("💾 Extrahierte Informationen in 'extracted_information.json' gespeichert")
-    
-    # Load the extracted information json
-    with open("extracted_information.json", "r", encoding="utf-8") as f:
-        extracted_information = json.load(f)
+    # save the extracted information to a json file
+    with open("extracted_information.json", "w", encoding="utf-8") as f:
+        json.dump(extracted_information, f, ensure_ascii=False)
+        print("💾 Extrahierte Informationen in 'extracted_information.json' gespeichert")
     
     # Combine the extracted information into a single string, count its tokens with the tokenizer of gpt-4o using tiktoken, to find out if it fits into the context window
     combined_information = "\n\n".join([f"Frage: {item['question']}\n\nInterpretation: {item['interpretation']}" for item in extracted_information])
