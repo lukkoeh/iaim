@@ -1,0 +1,6 @@
+.env
+extracted_information.json
+final_answer.txt
+answer_*.txt
+chroma_db/
+__pycache__/
