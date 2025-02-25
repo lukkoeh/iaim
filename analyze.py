@@ -115,6 +115,10 @@ if __name__ == "__main__":
     chunks = text_splitter.create_documents([processed_transcript])
     print(f"📊 Transkript in {len(chunks)} Chunks aufgeteilt")
 
+    print(f"Anzahl der Chunks: {len(chunks)}")
+    for i, chunk in enumerate(chunks):
+        print(f"Chunk {i+1}: {chunk.page_content[:50]}...")  # Zeigt die ersten 50 Zeichen jedes Chunks
+
     # Optional: Bereinige die Chunks, um Sprecher zu extrahieren
     print("\n🧹 Bereinige Chunks und extrahiere Sprecher...")
     clean_chunks = []
@@ -188,7 +192,7 @@ if __name__ == "__main__":
         # get the chunks that are relevant to the question
         relevant_chunks = collection.query(
             query_texts=[question],
-            n_results=3
+            n_results=5
         )
         
         # Verwende die relevanten Chunks für die Extraktion
