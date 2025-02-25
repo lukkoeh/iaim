@@ -267,15 +267,15 @@ if __name__ == "__main__":
         print(f"Chunk {i+1}: {chunk.page_content[:50]}...")  # Zeigt die ersten 50 Zeichen jedes Chunks
 
     # Optional: Bereinige die Chunks, um Sprecher zu extrahieren
-    print("\n🧹 Bereinige Chunks und extrahiere Sprecher mit 8 Threads...")
+    print("\n🧹 Bereinige Chunks und extrahiere Sprecher mit 4 Threads...")
     clean_chunks = []
     speaker_stats = {}
     
     # Thread-Lock für die gemeinsam genutzten Ressourcen
     lock = threading.Lock()
     
-    # Verarbeite Chunks parallel mit 8 Threads
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+    # Verarbeite Chunks parallel mit 4 Threads
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         # Starte alle Tasks und sammle die Futures
         futures = [executor.submit(clean_and_summarize_chunk, chunk, i, len(chunks), openai_client) 
                   for i, chunk in enumerate(chunks)]
@@ -318,11 +318,11 @@ if __name__ == "__main__":
     print("🎉 Transkriptanalyse abgeschlossen")
     print("=" * 50)
     
-    # Verarbeite Fragen parallel mit 8 Threads
-    print("\n🔄 Verarbeite Fragen parallel mit 8 Threads...")
+    # Verarbeite Fragen parallel mit 4 Threads
+    print("\n🔄 Verarbeite Fragen parallel mit 4 Threads...")
     extracted_information = []
     
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         # Starte alle Tasks und sammle die Futures
         futures = [executor.submit(process_question, question, q, len(questions_df), collection, openai_client) 
                   for q, question in enumerate(questions_df["question"])]
@@ -351,10 +351,10 @@ if __name__ == "__main__":
     
     if tokens < 125000:
         print("✅ Die kombinierte Information passt in das Kontextfenster von gpt-4o")
-        # Verarbeite jede Frage einzeln mit 8 Threads
+        # Verarbeite jede Frage einzeln mit 4 Threads
         final_answers = []
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
             # Starte alle Tasks und sammle die Futures
             futures = []
             for q, question in enumerate(questions_df["question"]):
