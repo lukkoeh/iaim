@@ -2,16 +2,19 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 import pandas as pd
 import json
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 import os
-
+import concurrent.futures
 import tiktoken
 from prompts import summary_prompt, cleaning_prompt, extraction_system_prompt, extraction_prompt, full_format_prompt
 import chromadb
 import chromadb.utils.embedding_functions as embedding_functions
+from preprocessor import Preprocessor, Interview
 
+# Anzahl der Threads für Multithreading-Operationen
+MAX_THREADS = 4
 
 def preprocess_transcript(transcript: str) -> str:
     """
@@ -38,6 +41,142 @@ def preprocess_transcript(transcript: str) -> str:
     speaker_count = len(re.findall(r"\[SPEAKER:([A-Z]{1,3})\]", processed))
     print(f"🔢 Insgesamt {speaker_count} Sprecherwechsel erkannt")
     return processed
+
+
+def process_chunk(args):
+    """
+    Verarbeitet einen einzelnen Chunk im Multithreading-Modus.
+    
+    Args:
+        args: Tuple mit (chunk, index, total_chunks, openai_client)
+        
+    Returns:
+        Verarbeiteter Chunk mit Zusammenfassung
+    """
+    chunk, i, total_chunks, openai_client = args
+    print(f"🔄 Bereinige Chunk {i+1}/{total_chunks} und fasse ihn zusammen (1. Zusammenfassung)")
+    text = chunk.text
+    speaker = chunk.speaker
+    
+    # Entferne die Sprechermarkierung aus dem Text
+    clean_text = text
+    
+    # Bereinige den Text mittels OpenAI um unnötige Zeichen und Füllwörter
+    clean_text = openai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": cleaning_prompt},
+            {"role": "user", "content": clean_text},
+        ],
+    )
+    clean_text = clean_text.choices[0].message.content
+    
+    # Erzeuge eine erste Zusammenfassung jedes Chunks und füge es einfach an den Text mit \n\n zusammen
+    summary = openai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": summary_prompt},
+            {"role": "user", "content": clean_text},
+        ],
+    )
+    summary = summary.choices[0].message.content
+    clean_text = f"{clean_text}\n\n{summary}"
+    
+    return {"text": clean_text, "speaker": speaker, "index": i}
+
+
+def process_question(args):
+    """
+    Verarbeitet eine einzelne Frage im Multithreading-Modus.
+    
+    Args:
+        args: Tuple mit (question, question_index, total_questions, collection, openai_client)
+        
+    Returns:
+        Extrahierte Informationen für die Frage
+    """
+    question, q, total_questions, collection, openai_client = args
+    print(f"❓ Frage: {question} (Frage {q}/{total_questions})")
+    
+    # get the chunks that are relevant to the question
+    relevant_chunks = collection.query(
+        query_texts=[question],
+        n_results=5
+    )
+    
+    # Verwende die relevanten Chunks für die Extraktion
+    chunk_texts = relevant_chunks["documents"][0]
+    response = openai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": extraction_system_prompt},
+            {"role": "user", "content": extraction_prompt.format(interview_chunk="\n".join(chunk_texts), interview_question=question, relevant_chunks=chunk_texts)},
+        ],
+    )
+    response = response.choices[0].message.content
+    return {"question": question, "interpretation": response}
+
+
+def process_final_answer(args):
+    """
+    Verarbeitet die finale Antwort für eine Frage im Multithreading-Modus.
+    
+    Args:
+        args: Tuple mit (question, question_index, total_questions, question_info, openai_client)
+        
+    Returns:
+        Finale Antwort für die Frage
+    """
+    question, q, total_questions, question_info, openai_client = args
+    print(f"🔄 Verarbeite Frage {q}/{total_questions}: {question}")
+    
+    # Bereite den Inhalt für diese Frage vor
+    question_content = f"Frage: {question_info['question']}\n\nInterpretation: {question_info['interpretation']}"
+    
+    # Generiere die Antwort für diese einzelne Frage
+    response = openai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": full_format_prompt.format(
+                interview_question=question)},
+            {"role": "user", "content": question_content},
+        ],
+        max_tokens=16384,
+        temperature=1,
+    )
+    
+    question_answer = response.choices[0].message.content
+    
+    # Setze die Generierung fort, falls die Antwort nicht vollständig ist
+    messages_history = [
+        {"role": "system", "content": full_format_prompt.format(
+            interview_question=question)},
+        {"role": "user", "content": question_content},
+        {"role": "assistant", "content": question_answer}
+    ]
+    
+    while response.choices[0].finish_reason != "stop":
+        print(f"🔄 Die Antwort für Frage {q} ist noch nicht vollständig, setze fort...")
+        messages_history.append({"role": "user", "content": "Bitte setze deine Analyse fort..."})
+        
+        response = openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages_history,
+            max_tokens=16384,
+            temperature=1,
+        )
+        
+        continuation = response.choices[0].message.content
+        question_answer += "\n" + continuation
+        messages_history.append({"role": "assistant", "content": continuation})
+    
+    tokens = len(tiktoken.encoding_for_model("gpt-4o").encode(question_answer))
+    print(f"✅ Frage {q} verarbeitet. Tokens: {tokens}")
+    
+    return {
+        "question": question,
+        "answer": question_answer
+    }
 
 
 if __name__ == "__main__":
@@ -92,77 +231,56 @@ if __name__ == "__main__":
     
     # Transkript vorverarbeiten
     print("\n" + "-" * 50)
-    print("🔄 Starte Transkriptvorverarbeitung...")
-    processed_transcript = preprocess_transcript(transcript)
+    print("🔄 Starte Transkriptvorverarbeitung... (Mit Preprocessor)")
+    # processed_transcript = preprocess_transcript(transcript)
+    preprocessor : Preprocessor = Preprocessor()
+    interview : Interview = preprocessor.ai_preprocess(transcript, augmented_questions=questions_df["question"].tolist(), use_multithreading=True, threads=MAX_THREADS)
     print("✅ Transkriptvorverarbeitung abgeschlossen")
 
     # Zeige das vorverarbeitete Transkript zur Überprüfung
     print("\n📝 Vorverarbeitetes Transkript:")
-    print(processed_transcript[:200] + "...")  # Nur die ersten 200 Zeichen
+    print(interview.transcript[:200] + "...")  # Nur die ersten 200 Zeichen
     print("-" * 50)
-
-    # Teile das Transkript nach Sprechern auf
-    print("\n✂️ Teile Transkript in Chunks...")
-    text_splitter = RecursiveCharacterTextSplitter(
-        separators=["\n\\[SPEAKER:", "\n", " "],  # Korrigierter Escape-Charakter
-        chunk_size=800,
-        chunk_overlap=0,
-        length_function=len,
-        is_separator_regex=True,
-    )
-    print(f"⚙️ Text-Splitter konfiguriert: Chunk-Größe={800}, Überlappung={0}")
-
-    chunks = text_splitter.create_documents([processed_transcript])
-    print(f"📊 Transkript in {len(chunks)} Chunks aufgeteilt")
-
-    print(f"Anzahl der Chunks: {len(chunks)}")
-    for i, chunk in enumerate(chunks):
-        print(f"Chunk {i+1}: {chunk.page_content[:50]}...")  # Zeigt die ersten 50 Zeichen jedes Chunks
 
     # Optional: Bereinige die Chunks, um Sprecher zu extrahieren
     print("\n🧹 Bereinige Chunks und extrahiere Sprecher...")
     clean_chunks = []
     speaker_stats = {}
     
-    for i, chunk in enumerate(chunks):
-        print(f"🔄 Bereinige Chunk {i+1}/{len(chunks)} und fasse ihn zusammen (1. Zusammenfassung)")
-        text = chunk.page_content
-        # Extrahiere den Sprecher aus dem Text (falls vorhanden)
-        speaker_match = re.search(r"\[SPEAKER:([A-Z]{1,3})\]", text)
-        speaker = speaker_match.group(1) if speaker_match else "UNKNOWN"
+    # Multithreaded Chunk-Verarbeitung
+    chunk_results = []
+    
+    if MAX_THREADS > 1:
+        print(f"🧵 Verwende Multithreading mit maximal {MAX_THREADS} Threads für die Chunk-Verarbeitung")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+            # Erstelle eine Liste von Argumenten für jeden Chunk
+            chunk_args = [(chunk, i, len(interview.snippets), openai_client) for i, chunk in enumerate(interview.snippets)]
+            # Verarbeite alle Chunks parallel
+            chunk_results = list(executor.map(process_chunk, chunk_args))
+    else:
+        print("🔄 Verwende sequentielle Verarbeitung für Chunks")
+        for i, chunk in enumerate(interview.snippets):
+            result = process_chunk((chunk, i, len(interview.snippets), openai_client))
+            chunk_results.append(result)
+    
+    # Sortiere die Ergebnisse nach dem ursprünglichen Index
+    chunk_results.sort(key=lambda x: x["index"])
+    
+    # Verarbeite die Ergebnisse
+    for result in chunk_results:
+        clean_text = result["text"]
+        speaker = result["speaker"]
+        i = result["index"]
         
         # Zähle Sprecher für Statistik
         if speaker in speaker_stats:
             speaker_stats[speaker] += 1
         else:
             speaker_stats[speaker] = 1
-
-        # Entferne die Sprechermarkierung aus dem Text
-        clean_text = re.sub(r"\[SPEAKER:[A-Z]{1,3}\]", "", text).strip()
-        
-        # Bereinige den Text mittels OpenAI um unnötige Zeichen und Füllwörter
-        clean_text = openai_client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": cleaning_prompt},
-                {"role": "user", "content": clean_text},
-            ],
-        )
-        clean_text = clean_text.choices[0].message.content
-        # Erzeuge eine erste Zusammenfassung jedes Chunks und füge es einfach an den Text mit \n\n zusammen
-        summary = openai_client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": summary_prompt},
-                {"role": "user", "content": clean_text},
-            ],
-        )
-        summary = summary.choices[0].message.content
-        clean_text = f"{clean_text}\n\n{summary}"
-
+            
         if clean_text:  # Ignoriere leere Chunks
             clean_chunks.append(clean_text)
-            if i < 3 or i >= len(chunks) - 3:  # Zeige die ersten und letzten 3 Chunks
+            if i < 3 or i >= len(interview.snippets) - 3:  # Zeige die ersten und letzten 3 Chunks
                 print(f"📄 Chunk {i+1} (Sprecher: {speaker}): {clean_text[:50]}...")
 
     print(f"\n✅ Bereinigte Chunks: {len(clean_chunks)}")
@@ -186,26 +304,21 @@ if __name__ == "__main__":
     
     extracted_information = []
     
-    # cycle through the questions and the chunks and do a rag based extraction of information
-    for q, question in enumerate(questions_df["question"], 1):
-        print(f"❓ Frage: {question} (Frage {q}/{len(questions_df)})")
-        # get the chunks that are relevant to the question
-        relevant_chunks = collection.query(
-            query_texts=[question],
-            n_results=5
-        )
-        
-        # Verwende die relevanten Chunks für die Extraktion
-        chunk_texts = relevant_chunks["documents"][0]
-        response = openai_client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": extraction_system_prompt},
-                {"role": "user", "content": extraction_prompt.format(interview_chunk="\n".join(chunk_texts), interview_question=question, relevant_chunks=chunk_texts)},
-            ],
-        )
-        response = response.choices[0].message.content
-        extracted_information.append({"question": question, "interpretation": response})
+    # Multithreaded Fragen-Verarbeitung
+    if MAX_THREADS > 1:
+        print(f"🧵 Verwende Multithreading mit {MAX_THREADS} Threads für die Fragen-Verarbeitung")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+            # Erstelle eine Liste von Argumenten für jede Frage
+            question_args = [(question, q, len(questions_df), collection, openai_client) 
+                            for q, question in enumerate(questions_df["question"], 1)]
+            # Verarbeite alle Fragen parallel
+            extracted_information = list(executor.map(process_question, question_args))
+    else:
+        print("🔄 Verwende sequentielle Verarbeitung für Fragen")
+        # cycle through the questions and the chunks and do a rag based extraction of information
+        for q, question in enumerate(questions_df["question"], 1):
+            result = process_question((question, q, len(questions_df), collection, openai_client))
+            extracted_information.append(result)
             
     # save the extracted information to a json file
     with open("extracted_information.json", "w", encoding="utf-8") as f:
@@ -222,61 +335,30 @@ if __name__ == "__main__":
         # Verarbeite jede Frage einzeln
         final_answers = []
         
-        for q, question in enumerate(questions_df["question"], 1):
-            print(f"🔄 Verarbeite Frage {q}/{len(questions_df)}: {question}")
-            
-            # Filtere die extrahierten Informationen für diese spezifische Frage
-            question_info = next((item for item in extracted_information if item["question"] == question), None)
-            
-            if question_info:
-                # Bereite den Inhalt für diese Frage vor
-                question_content = f"Frage: {question_info['question']}\n\nInterpretation: {question_info['interpretation']}"
+        # Multithreaded finale Antworten-Verarbeitung
+        if MAX_THREADS > 1:
+            print(f"🧵 Verwende Multithreading mit {MAX_THREADS} Threads für die finalen Antworten")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+                # Erstelle eine Liste von Argumenten für jede Frage
+                final_args = []
+                for q, question in enumerate(questions_df["question"], 1):
+                    # Filtere die extrahierten Informationen für diese spezifische Frage
+                    question_info = next((item for item in extracted_information if item["question"] == question), None)
+                    if question_info:
+                        final_args.append((question, q, len(questions_df), question_info, openai_client))
                 
-                # Generiere die Antwort für diese einzelne Frage
-                response = openai_client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {"role": "system", "content": full_format_prompt.format(
-                            interview_question=question)},
-                        {"role": "user", "content": question_content},
-                    ],
-                    max_tokens=16384,
-                    temperature=1,
-                )
+                # Verarbeite alle finalen Antworten parallel
+                if final_args:
+                    final_answers = list(executor.map(process_final_answer, final_args))
+        else:
+            print("🔄 Verwende sequentielle Verarbeitung für finale Antworten")
+            for q, question in enumerate(questions_df["question"], 1):
+                # Filtere die extrahierten Informationen für diese spezifische Frage
+                question_info = next((item for item in extracted_information if item["question"] == question), None)
                 
-                question_answer = response.choices[0].message.content
-                
-                # Setze die Generierung fort, falls die Antwort nicht vollständig ist
-                messages_history = [
-                    {"role": "system", "content": full_format_prompt.format(
-                        interview_question=question)},
-                    {"role": "user", "content": question_content},
-                    {"role": "assistant", "content": question_answer}
-                ]
-                
-                while response.choices[0].finish_reason != "stop":
-                    print(f"🔄 Die Antwort für Frage {q} ist noch nicht vollständig, setze fort...")
-                    messages_history.append({"role": "user", "content": "Bitte setze deine Analyse fort..."})
-                    
-                    response = openai_client.chat.completions.create(
-                        model="gpt-4o",
-                        messages=messages_history,
-                        max_tokens=16384,
-                        temperature=1,
-                    )
-                    
-                    continuation = response.choices[0].message.content
-                    question_answer += "\n" + continuation
-                    messages_history.append({"role": "assistant", "content": continuation})
-                
-                # Speichere die Antwort für diese Frage
-                final_answers.append({
-                    "question": question,
-                    "answer": question_answer
-                })
-                
-                tokens = len(tiktoken.encoding_for_model("gpt-4o").encode(question_answer))
-                print(f"✅ Frage {q} verarbeitet. Tokens: {tokens}")
+                if question_info:
+                    result = process_final_answer((question, q, len(questions_df), question_info, openai_client))
+                    final_answers.append(result)
         
         # Kombiniere alle Antworten zu einem Gesamtdokument
         final_answer = "# Gesamtauswertung des Interviews\n\n"
@@ -306,5 +388,4 @@ if __name__ == "__main__":
         # Implementiere eine Alternative für große Inhalte
         print("🔄 Verarbeite Antworten in Batches...")
         # Hier könnte Code für eine Batch-Verarbeitung folgen
-
 # Führe die Informationen zusammen, indem die erste Zusammenfassung immer mit der nächsten verknüpft und erweitert wird.
