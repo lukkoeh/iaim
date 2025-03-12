@@ -1,10 +1,11 @@
-"""Modul zur Vorverarbeitung von Interview-Transkripten mit KI-Unterstützung.
-Dieses Modul verarbeitet große Transkripte in kleinere Teile und verarbeitet sie mit KI.
-Die Ergebnisse werden in ein Interview-Objekt umgewandelt.
-Das Modul wurde mithilfe von Cursor refactored, um ein 10/10 pylint Ergebnis zu erhalten.
-Pre-Commit Hooks werden empfohlen.
+"""Module for preprocessing interview transcripts with AI support.
+This module processes large transcripts into smaller parts and processes them with AI.
+The results are converted into an Interview object.
+The module was refactored with the help of Cursor to achieve a 10/10 pylint score.
+Pre-Commit Hooks are recommended.
 """
 
+import logging
 import os
 import re
 import concurrent.futures
@@ -16,13 +17,13 @@ import tiktoken
 
 
 class Snippet(BaseModel):
-    """Repräsentiert einen einzelnen Gesprächsabschnitt mit Sprecher und Text."""
+    """Represents a single conversation segment with speaker and text."""
     speaker: str
     text: str
 
 
 class Interview(BaseModel):
-    """Repräsentiert ein vollständiges Interview mit Transkript, Sprechern, Fragen und Snippets."""
+    """Represents a complete interview with transcript, speakers, questions and snippets."""
     transcript: str
     speakers: List[str]
     questions: List[str]
@@ -31,7 +32,7 @@ class Interview(BaseModel):
 
 
 class Preprocessor:
-    """Verarbeitet Interviewtranskripte mit KI und erstellt strukturierte Interview-Objekte."""
+    """Processes interview transcripts with AI and creates structured Interview objects."""
     def __init__(self):
         load_dotenv(override=True)
         self.openai_client: AzureOpenAI = AzureOpenAI(
@@ -39,18 +40,18 @@ class Preprocessor:
             api_version=os.getenv("AZURE_API_VERSION"),
             azure_endpoint=os.getenv("AZURE_ENDPOINT"),
         )
-        self.max_tokens: int = 7000  # Sicherheitsgrenze für Tokens
+        self.max_tokens: int = 7000  # Safety limit for tokens
 
     def _process_sentences(self, paragraph: str, current: dict, parts: list) -> dict:
-        """Verarbeitet einzelne Sätze eines Paragraphen.
+        """Processes individual sentences of a paragraph.
         
         Args:
-            paragraph: Zu verarbeitender Paragraph
-            current: Aktueller Chunk und Token-Zähler
-            parts: Liste der fertigen Teile
+            paragraph: Paragraph to be processed
+            current: Current chunk and token counter
+            parts: List of completed parts
             
         Returns:
-            Aktualisierter Chunk und Token-Zähler
+            Updated chunk and token counter
         """
         for sentence in re.split(r"(?<=[.!?])\s+", paragraph.strip()):
             s_clean = f"{sentence} "
@@ -66,13 +67,13 @@ class Preprocessor:
 
     def _split_transcript(self, text: str) -> List[str]:
         """
-        Teilt das Transkript in kleinere Teile auf, die innerhalb des Token-Limits liegen.
+        Splits the transcript into smaller parts that are within the token limit.
         
         Args:
-            text: Das vollständige Transkript
+            text: The complete transcript
             
         Returns:
-            Liste von Transkript-Teilen unter dem Token-Limit
+            List of transcript parts below the token limit
         """
         if len(tiktoken.encoding_for_model("gpt-4o").encode(text)) <= self.max_tokens:
             return [text]
@@ -102,55 +103,55 @@ class Preprocessor:
 
     def _merge_interview_parts(self, interview_parts: List[Interview]) -> Interview:
         """
-        Führt mehrere Interview-Teile zu einem vollständigen Interview zusammen.
-        Stellt sicher, dass jeder Sprecher nur einmal vorkommt und alle Snippets
-        zusammengeführt werden.
+        Merges multiple interview parts into a complete interview.
+        Ensures that each speaker appears only once and all snippets
+        are merged.
 
         Args:
-            interview_parts: Liste von Interview-Objekten
+            interview_parts: List of Interview objects
 
         Returns:
-            Ein zusammengeführtes Interview-Objekt mit allen Inhalten
+            A merged Interview object with all content
         """
         if len(interview_parts) == 1:
             return interview_parts[0]
 
-        # Nehme das erste Interview als Basis
+        # Take the first interview as a base
         merged = Interview(transcript="", speakers=[], questions=[], snippets=[])
 
-        # Sammle alle Transkripte
+        # Collect all transcripts
         all_transcripts = [part.transcript for part in interview_parts]
         merged.transcript = max(all_transcripts, key=len) if all_transcripts else ""
 
-        # Sammle alle einzigartigen Sprecher
+        # Collect all unique speakers
         unique_speakers = set()
         for part in interview_parts:
             unique_speakers.update(part.speakers)
         merged.speakers = list(unique_speakers)
 
-        # Sammle alle einzigartigen Fragen
+        # Collect all unique questions
         unique_questions = set()
         for part in interview_parts:
             unique_questions.update(part.questions)
         merged.questions = list(unique_questions)
 
-        # Sammle alle Snippets
+        # Collect all snippets
         for part in interview_parts:
             merged.snippets.extend(part.snippets)
 
         return merged
 
     def process_part(self, part: str, i: int, transcript_parts: List[str]) -> Interview:
-        """Verarbeitet einen einzelnen Teil des Transkripts und erstellt ein Interview-Objekt.
+        """Processes a single part of the transcript and creates an Interview object.
         Args:
-            part: Textteil des Transkripts
-            i: Index des aktuellen Teils
-            transcript_parts: Liste aller Transkriptteile
+            part: Text part of the transcript
+            i: Index of the current part
+            transcript_parts: List of all transcript parts
             
         Returns:
-            Interview-Objekt mit extrahierten Daten
+            Interview object with extracted data
         """
-        print(f"[PREPROCESS] PROCESSING CHUNK {i+1} OF {len(transcript_parts)}")
+        logging.info("Preprocessing chunk %d of %d from transcript", i+1, len(transcript_parts))
         return self.openai_client.beta.chat.completions.parse(
             model="gpt-4o",
             messages=[
@@ -172,7 +173,7 @@ class Preprocessor:
         )
 
     def _process_small_transcript(self, text: str) -> Interview:
-        """Verarbeitet ein kleines Transkript direkt."""
+        """Processes a small transcript directly."""
         response = self.openai_client.beta.chat.completions.parse(
             model="gpt-4o",
             messages=[
@@ -197,22 +198,22 @@ class Preprocessor:
         use_multithreading: Optional[bool] = False,
         threads: Optional[int] = 1) -> Interview:
         """
-        Verarbeitet ein Transkript mit KI-Unterstützung und erstellt ein Interview-Objekt.
-        Teilt große Transkripte auf, um Token-Limits zu umgehen.
+        Processes a transcript with AI support and creates an Interview object.
+        Splits large transcripts to avoid token limits.
 
         Args:
-            text: Das zu verarbeitende Transkript
-            augmented_questions: Optionale Liste von Fragen
-            use_multithreading: Flag, ob Multithreading verwendet werden soll
-            threads: Anzahl der zu verwendenden Threads
+            text: The transcript to be processed
+            augmented_questions: Optional list of questions
+            use_multithreading: Flag whether to use multithreading
+            threads: Number of threads to use
 
         Returns:
-            Ein Interview-Objekt mit strukturierten Daten
+            An Interview object with structured data
         """
         if len(tiktoken.encoding_for_model("gpt-4o").encode(text)) <= self.max_tokens:
             result = self._process_small_transcript(text)
         else:
-            # Für große Transkripte: Aufteilung und separate Verarbeitung
+            # For large transcripts: Split and process separately
             parts = self._split_transcript(text)
             if use_multithreading and threads > 1:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:

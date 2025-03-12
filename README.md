@@ -1,89 +1,150 @@
-# Transkriptanalyse-Tool
+# IAIM - Interview Analysis and Information Mining
 
-Ein leistungsstarkes Tool zur Analyse von Interview-Transkripten mit Hilfe von KI. Das Tool verarbeitet Transkripte, extrahiert relevante Informationen basierend auf Fragen und erstellt eine umfassende Auswertung.
+A Python toolkit for transforming interview transcripts into structured knowledge for Retrieval-Augmented Generation (RAG) systems.
 
-## Funktionen
+## Overview
 
-- Vorverarbeitung von Transkripten
-- Erkennung von Sprecherwechseln
-- Zerlegung des Texts in semantisch sinnvolle Chunks
-- Relevante Informationsextraktion basierend auf vordefinierten Fragen
-- Vektorbasierte Suche mit ChromaDB
-- Generierung einer strukturierten Gesamtauswertung
+IAIM processes interview transcripts using AI to extract meaningful information, summarize content, and prepare data for knowledge retrieval systems. The toolkit leverages Azure OpenAI services and ChromaDB for vector storage.
 
-## Anforderungen
+## Features
 
-Das Projekt benötigt folgende Python-Pakete:
+- **Transcript Preprocessing**: Clean and structure raw interview transcripts
+- **Speaker Recognition**: Automatically identify and tag different speakers
+- **Question Extraction**: Identify and categorize questions within interviews
+- **AI-Powered Summarization**: Generate concise summaries of interview segments
+- **Information Extraction**: Extract key information based on predefined questions
+- **Vector Storage**: Store processed data in ChromaDB for efficient retrieval
+- **Multithreading Support**: Process large transcripts efficiently with parallel processing
 
-langchain_text_splitters>=0.0.1
-pandas>=2.0.0
-openai>=1.1.0
-python-dotenv>=1.0.0
-tiktoken>=0.5.0
-chromadb>=0.4.6
+## Prerequisites
+
+- Python 3.13+
+- Poetry for dependency management
+- Azure OpenAI API access
+- Docker and Docker Compose (optional, for Neo4j integration)
 
 ## Installation
 
-# Repository klonen
-git clone https://github.com/username/transkriptanalyse.git
-cd transkriptanalyse
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/iaim.git
+   cd iaim
+   ```
 
-# Virtuelle Umgebung erstellen und aktivieren
-python -m venv venv
-source venv/bin/activate  # Unter Windows: venv\Scripts\activate
+2. Install dependencies using Poetry:
+   ```bash
+   poetry install
+   ```
 
-# Abhängigkeiten installieren
-pip install langchain_text_splitters pandas openai python-dotenv tiktoken chromadb
+3. Set up environment variables by copying the example file:
+   ```bash
+   cp .env.example .env
+   ```
 
-## Konfiguration
+4. Edit the `.env` file with your Azure OpenAI credentials:
+   ```
+   AZURE_API_KEY="your-api-key"
+   AZURE_API_VERSION="your-api-version"
+   AZURE_ENDPOINT="your-azure-endpoint"
+   AZURE_EMBEDDING_KEY="your-embedding-key"
+   AZURE_EMBEDDING_ENDPOINT="your-embedding-endpoint"
+   AZURE_EMBEDDING_MODEL="your-embedding-model"
+   ```
 
-Erstellen Sie eine `.env`-Datei im Stammverzeichnis mit folgenden Variablen:
+## Usage Examples
 
-```
-AZURE_API_KEY=your_azure_openai_api_key
-AZURE_API_VERSION=your_azure_openai_api_version
-AZURE_ENDPOINT=your_azure_openai_endpoint
-AZURE_EMBEDDING_KEY=your_azure_embedding_key
-AZURE_EMBEDDING_ENDPOINT=your_azure_embedding_endpoint
-```
+### Preprocessing an Interview Transcript
 
-## Datenstruktur
+```python
+from modules.preprocessor import Preprocessor
 
-Das Tool erwartet folgende Dateien:
+# Initialize the preprocessor
+preprocessor = Preprocessor()
 
-- `data/sample_transcript.txt`: Das zu analysierende Interview-Transkript
-- `data/questions.json`: Die für die Analyse relevanten Fragen im JSON-Format
+# Process a transcript file
+with open("samples/interview.txt", "r", encoding="utf-8") as f:
+    transcript = f.read()
 
-## Verwendung
+# Process the transcript with AI assistance
+interview = preprocessor.ai_preprocess(
+    text=transcript,
+    use_multithreading=True,
+    threads=4
+)
 
-```
-# Hauptanalyse ausführen
-python analyze.py
-```
-
-## Ausgabe
-
-Das Tool generiert folgende Ausgabedateien:
-
-- `extracted_information.json`: Extrahierte Informationen für jede Frage
-- `final_answer.txt`: Strukturierte Gesamtauswertung des Interviews
-
-## Projektstruktur
-
-```
-├── analyze.py               # Hauptskript für die Transkriptanalyse
-├── prompts.py               # Vorlagen für GPT-Prompts
-├── data/
-│   ├── sample_transcript.txt # Interview-Transkript
-│   └── questions.json       # Analysefragen
-├── chroma_db/               # Speicherort für die Vektordatenbank
-├── extracted_information.json # Generierte Zwischenergebnisse
-└── final_answer.txt         # Finale Auswertung
+# Access the structured data
+print(f"Speakers: {interview.speakers}")
+print(f"Questions: {interview.questions}")
+print(f"Number of snippets: {len(interview.snippets)}")
 ```
 
-## Hinweise zur Anpassung
+### Analyzing a Transcript with Custom Questions
 
-- Passen Sie die Chunk-Größe in `analyze.py` an, falls die Transkripte sehr lang oder kurz sind
-- Die Prompts in `prompts.py` können für unterschiedliche Analyseanforderungen angepasst werden
-- Bei großen Transkripten beachten Sie das Token-Limit von GPT-4o (125.000 Tokens)
+```python
+from modules.transcriptanalyzer import TranscriptAnalyzer
 
+# Initialize the analyzer
+analyzer = TranscriptAnalyzer(max_threads=4)
+
+# Analyze a transcript with custom questions
+answers = analyzer.analyze(
+    questions_path="samples/questions.json",
+    transcript_path="samples/interview.txt"
+)
+
+# Print the answers
+for answer in answers:
+    print(answer)
+```
+
+### Example Questions JSON Format
+
+```json
+[
+  "What are the main challenges mentioned in the interview?",
+  "What solutions were proposed?",
+  "What is the interviewee's background and experience?"
+]
+```
+
+## Core Components
+
+### Preprocessor
+
+The `Preprocessor` class handles the initial processing of interview transcripts:
+
+- Splits large transcripts into manageable chunks
+- Identifies speakers and their dialogues
+- Extracts questions from the interview
+- Creates a structured `Interview` object
+
+### TranscriptAnalyzer
+
+The `TranscriptAnalyzer` class performs in-depth analysis of preprocessed interviews:
+
+- Cleans and summarizes interview chunks
+- Extracts relevant information based on questions
+- Generates comprehensive answers
+- Stores processed data in ChromaDB for retrieval
+
+## Docker Integration
+
+The project includes a Docker Compose configuration for Neo4j integration:
+
+```bash
+docker-compose up -d
+```
+
+This will start a Neo4j instance that can be used for graph-based knowledge representation.
+
+## Development
+
+This project uses pre-commit hooks for code quality:
+
+```bash
+pre-commit install
+```
+
+## License
+
+This project is licensed under the GPLv3 License - see the LICENSE file for details.

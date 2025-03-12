@@ -1,9 +1,9 @@
 """
-Modul zur Analyse von Transkripten mit Hilfe von KI-Modellen.
+Module for analyzing transcripts using AI models.
 
-Dieses Modul enthält die TranscriptAnalyzer-Klasse, die Transkripte verarbeitet,
-Informationen extrahiert und Antworten auf Fragen generiert. Es nutzt Azure OpenAI
-und ChromaDB für die Verarbeitung und Speicherung der Daten.
+This module contains the TranscriptAnalyzer class, which processes transcripts,
+extracts information, and generates answers to questions. It uses Azure OpenAI
+and ChromaDB for processing and storing data.
 """
 
 import json
@@ -20,12 +20,12 @@ import chromadb
 # pylint: disable-next=no-member
 import chromadb.utils.embedding_functions as embed_fns
 import chromadb.errors as chroma_errors
-from prompts import (
-    summary_prompt,
-    cleaning_prompt,
-    extraction_system_prompt,
-    extraction_prompt,
-    full_format_prompt,
+from static.prompts import (
+    SUMMARY_PROMPT,
+    CLEANING_PROMPT,
+    EXTRACTION_SYSTEM_PROMPT,
+    EXTRACTION_PROMPT,
+    FULL_FORMAT_PROMPT
 )
 from preprocessor import (
     Preprocessor,
@@ -35,36 +35,33 @@ from preprocessor import (
 # pylint: disable-next=too-many-instance-attributes
 class TranscriptAnalyzer:
     """
-    Klasse zur Analyse von Transkripten mit Hilfe von KI-Modellen.
+    Class for analyzing transcripts using AI models.
 
-    Diese Klasse ermöglicht die Verarbeitung von Transkripten, die Extraktion von Informationen
-    basierend auf Fragen und die Generierung von Antworten.
+    This class enables the processing of transcripts, extraction of information
+    based on questions, and generation of answers.
     """
 
     def __init__(
         self,
         max_threads: int = 4,
-        db_path: str = "chroma_db",
         collection_name: str = "transcript_chunks",
     ):
         """
-        Initialisiert den TranscriptAnalyzer.
+        Initializes the TranscriptAnalyzer.
 
         Args:
-            max_threads: Maximale Anzahl der Threads für Multithreading-Operationen
-            db_path: Pfad zur ChromaDB
-            collection_name: Name der Kollektion in der ChromaDB
+            max_threads: Maximum number of threads for multithreading operations
+            collection_name: Name of the collection in ChromaDB
         """
         self.max_threads: int = max_threads
         self.openai_client: Optional[AzureOpenAI] = None
-        self.db_client: Optional[chromadb.PersistentClient] = None
+        self.db_client: Optional[chromadb.Client] = None
         self.collection: Optional[Any] = None
         self.collection_name: str = collection_name
-        self.db_path: str = db_path
         self.preprocessor: Preprocessor = Preprocessor()
         self.interview: Optional[Interview] = None
         self.questions_df: Optional[pd.DataFrame] = None
-        # Reduziere die Anzahl der Instanzattribute durch Verwendung eines Dictionaries
+        # Reduce the number of instance attributes by using a dictionary
         self.data: Dict[str, Any] = {
             "clean_chunks": [],
             "extracted_information": [],
@@ -72,23 +69,23 @@ class TranscriptAnalyzer:
             "question_answer_pairs": []
         }
 
-        # Lade Umgebungsvariablen
+        # Load environment variables
         load_dotenv(override=True)
 
     def initialize_clients(self) -> None:
         """
-        Initialisiert die OpenAI- und ChromaDB-Clients.
+        Initializes the OpenAI and ChromaDB clients.
         """
-        # Initialisiere den Azure OpenAI Client
+        # Initialize the Azure OpenAI Client
         self.openai_client = AzureOpenAI(
             api_key=os.getenv("AZURE_API_KEY"),
             api_version=os.getenv("AZURE_API_VERSION"),
             azure_endpoint=os.getenv("AZURE_ENDPOINT"),
         )
-        logging.info("🤖 Azure OpenAI Client initialisiert")
+        logging.info("Azure OpenAI Client initialized")
 
-        # Konfiguriere die Embedding-Funktion
-        # Importiere die Klasse direkt, um das no-member Problem zu beheben
+        # Configure the Embedding function
+        # Import the class directly to fix the no-member problem
         # pylint: disable-next=no-member
         default_ef = embed_fns.OpenAIEmbeddingFunction(
             api_key=os.getenv("AZURE_EMBEDDING_KEY"),
@@ -97,30 +94,30 @@ class TranscriptAnalyzer:
             api_version="2023-05-15",
             model_name="text-embedding-3-large",
         )
-        logging.info("🧠 Embedding-Funktion konfiguriert")
+        logging.info("Embedding function configured")
 
-        # Erstelle ChromaDB Client
-        self.db_client = chromadb.PersistentClient(path=self.db_path)
-        logging.info("💾 ChromaDB Client erstellt mit Pfad: %s", self.db_path)
+        # Create ChromaDB Client
+        self.db_client = chromadb.Client()
+        logging.info("ChromaDB Client created")
 
-        # Erstelle eine Kollektion in der ChromaDB
+        # Create a collection in ChromaDB
         logging.info(
-            "🗑️ Lösche vorhandene Kollektion '%s' falls vorhanden...",
+            "Deleting existing collection '%s' if present...",
             self.collection_name
         )
         try:
             self.db_client.delete_collection(name=self.collection_name)
-            logging.info("✅ Vorhandene Kollektion gelöscht")
+            logging.info("Existing collection deleted")
         except ValueError as e:
-            # Spezifischere Ausnahme anstelle von allgemeinem Exception
+            # More specific exception instead of general Exception
             logging.info(
-                "ℹ️ Keine vorhandene Kollektion gefunden oder Fehler beim Löschen: %s",
+                "No existing collection found or error while deleting: %s",
                 e
             )
         except chroma_errors.NotFoundError as e:
             if "Collection not found" in str(e):
                 logging.info(
-                    "ℹ️ Kollektion nicht gefunden: %s",
+                    "Collection not found: %s",
                     e
                 )
 
@@ -128,87 +125,86 @@ class TranscriptAnalyzer:
             name=self.collection_name, embedding_function=default_ef
         )
         logging.info(
-            "📦 Neue ChromaDB Kollektion '%s' erstellt",
+            "New ChromaDB collection '%s' created",
             self.collection_name
         )
 
     def load_data(self, questions_path: str, transcript_path: str) -> None:
         """
-        Lädt Fragen und Transkript aus Dateien.
+        Loads questions and transcript from files.
 
         Args:
-            questions_path: Pfad zur JSON-Datei mit Fragen
-            transcript_path: Pfad zur Textdatei mit dem Transkript
+            questions_path: Path to JSON file with questions
+            transcript_path: Path to text file with the transcript
         """
-        # Lade Fragen aus JSON-Datei
+        # Load questions from JSON file
         with open(questions_path, "r", encoding="utf-8") as f:
             json_data: Dict = json.load(f)
         self.questions_df = pd.DataFrame(json_data)
         logging.info(
-            "❓ Fragen geladen: %d Einträge gefunden",
+            "Questions loaded: %d entries found",
             len(self.questions_df)
         )
 
-        # Lade Transkript aus Textdatei
+        # Load transcript from text file
         with open(transcript_path, "r", encoding="utf-8") as f:
             transcript: str = f.read()
-        logging.info("📄 Transkript geladen: %d Zeichen", len(transcript))
+        logging.info("Transcript loaded: %d characters", len(transcript))
 
-        # Vorverarbeite das Transkript
+        # Preprocess the transcript
         logging.info("%s", "\n" + "-" * 50)
         logging.info(
-            "🔄 Starte Transkriptvorverarbeitung... (Mit Preprocessor)")
+            "Starting transcript preprocessing... (With Preprocessor)")
         self.interview = self.preprocessor.ai_preprocess(
             transcript,
             augmented_questions=self.questions_df["question"].tolist(),
             use_multithreading=True,
             threads=self.max_threads,
         )
-        logging.info("✅ Transkriptvorverarbeitung abgeschlossen")
+        logging.info("Transcript preprocessing completed")
 
-        # Zeige das vorverarbeitete Transkript zur Überprüfung
-        logging.info("\n📝 Vorverarbeitetes Transkript:")
-        # Nur die ersten 200 Zeichen
+        # Show the preprocessed transcript for verification
+        logging.info("\nPreprocessed transcript:")
+        # Only the first 200 characters
         logging.info("%s...", self.interview.transcript[:200])
         logging.info("%s", "-" * 50)
 
     def _process_chunk(self, args: Tuple) -> Dict:
         """
-        Verarbeitet einen einzelnen Chunk im Multithreading-Modus.
+        Processes a single chunk in multithreading mode.
 
         Args:
-            args: Tuple mit (chunk, index, total_chunks, openai_client)
+            args: Tuple with (chunk, index, total_chunks, openai_client)
 
         Returns:
-            Verarbeiteter Chunk mit Zusammenfassung
+            Processed chunk with summary
         """
         chunk, i, total_chunks, openai_client = args
         logging.info(
-            "🔄 Bereinige Chunk %d/%d und fasse ihn zusammen (1. Zusammenfassung)",
+            "Cleaning chunk %d/%d and summarizing it (1st summary)",
             i + 1, total_chunks
         )
         text = chunk.text
         speaker = chunk.speaker
 
-        # Entferne die Sprechermarkierung aus dem Text
+        # Remove speaker marking from text
         clean_text = text
 
-        # Bereinige den Text mittels OpenAI um unnötige Zeichen und Füllwörter
+        # Clean the text using OpenAI to remove unnecessary characters and filler words
         clean_text = openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": cleaning_prompt},
+                {"role": "system", "content": CLEANING_PROMPT},
                 {"role": "user", "content": clean_text},
             ],
         )
         clean_text = clean_text.choices[0].message.content
 
-        # Erzeuge eine erste Zusammenfassung jedes Chunks und füge es einfach
-        # an den Text mit \n\n zusammen
+        # Generate an initial summary of each chunk and append it to the text with \n\n
         summary = openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": summary_prompt},
+                {"role": "system", "content": SUMMARY_PROMPT},
                 {"role": "user", "content": clean_text},
             ],
         )
@@ -219,112 +215,112 @@ class TranscriptAnalyzer:
 
     def process_chunks(self) -> None:
         """
-        Verarbeitet alle Chunks des Transkripts.
+        Processes all chunks of the transcript.
         """
-        logging.info("\n🧹 Bereinige Chunks und extrahiere Sprecher...")
+        logging.info("\nCleaning chunks and extracting speakers...")
         self.data["clean_chunks"] = []
         speaker_stats = {}
 
-        # Multithreaded Chunk-Verarbeitung
+        # Multithreaded chunk processing
         chunk_results = []
 
         if self.max_threads > 1:
             logging.info(
-                "🧵 Verwende Multithreading mit maximal %d Threads für die Chunk-Verarbeitung",
+                "Using multithreading with maximum %d threads for chunk processing",
                 self.max_threads
             )
             with concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.max_threads
             ) as executor:
-                # Erstelle eine Liste von Argumenten für jeden Chunk
+                # Create a list of arguments for each chunk
                 chunk_args = [
                     (chunk, i, len(self.interview.snippets), self.openai_client)
                     for i, chunk in enumerate(self.interview.snippets)
                 ]
-                # Verarbeite alle Chunks parallel
+                # Process all chunks in parallel
                 chunk_results = list(
                     executor.map(
                         self._process_chunk,
                         chunk_args))
         else:
-            logging.info("🔄 Verwende sequentielle Verarbeitung für Chunks")
+            logging.info("Using sequential processing for chunks")
             for i, chunk in enumerate(self.interview.snippets):
                 result = self._process_chunk(
                     (chunk, i, len(self.interview.snippets), self.openai_client)
                 )
                 chunk_results.append(result)
 
-        # Sortiere die Ergebnisse nach dem ursprünglichen Index
+        # Sort results by original index
         chunk_results.sort(key=lambda x: x["index"])
 
-        # Verarbeite die Ergebnisse
+        # Process the results
         for result in chunk_results:
             clean_text = result["text"]
             speaker = result["speaker"]
             i = result["index"]
 
-            # Zähle Sprecher für Statistik
+            # Count speakers for statistics
             if speaker in speaker_stats:
                 speaker_stats[speaker] += 1
             else:
                 speaker_stats[speaker] = 1
 
-            if clean_text:  # Ignoriere leere Chunks
+            if clean_text:  # Ignore empty chunks
                 self.data["clean_chunks"].append(clean_text)
                 if (
                     i < 3 or i >= len(self.interview.snippets) - 3
-                ):  # Zeige die ersten und letzten 3 Chunks
+                ):  # Show the first and last 3 chunks
                     logging.info(
-                        "📄 Chunk %d (Sprecher: %s): %s...",
+                        "Chunk %d (Speaker: %s): %s...",
                         i + 1, speaker, clean_text[:50]
                     )
 
-        logging.info("\n✅ Bereinigte Chunks: %d", len(self.data["clean_chunks"]))
-        logging.info("👥 Sprecher-Statistik:")
+        logging.info("\nCleaned chunks: %d", len(self.data["clean_chunks"]))
+        logging.info("Speaker statistics:")
         for speaker, count in speaker_stats.items():
-            logging.info("  👤 %s: %d Chunks", speaker, count)
+            logging.info("  %s: %d chunks", speaker, count)
 
-        # Füge die Chunks zur ChromaDB hinzu
+        # Add chunks to ChromaDB
         logging.info("%s", "\n" + "-" * 50)
         logging.info(
-            "💾 Füge %d Chunks zur ChromaDB hinzu...",
+            "Adding %d chunks to ChromaDB...",
             len(self.data["clean_chunks"])
         )
         self.collection.add(
             ids=[str(i) for i in range(len(self.data["clean_chunks"]))],
             documents=self.data["clean_chunks"],
         )
-        logging.info("✅ Chunks erfolgreich zur ChromaDB hinzugefügt")
+        logging.info("Chunks successfully added to ChromaDB")
         logging.info(
-            "📊 Anzahl der Dokumente in der Kollektion: %d",
+            "Number of documents in collection: %d",
             self.collection.count()
         )
 
     def _process_question(self, args: Tuple) -> Dict:
         """
-        Verarbeitet eine einzelne Frage im Multithreading-Modus.
+        Processes a single question in multithreading mode.
 
         Args:
-            args: Tuple mit (question, question_index, total_questions, collection, openai_client)
+            args: Tuple with (question, question_index, total_questions, collection, openai_client)
 
         Returns:
-            Extrahierte Informationen für die Frage
+            Extracted information for the question
         """
         question, q, total_questions, collection, openai_client = args
-        logging.info("❓ Frage: %s (Frage %d/%d)", question, q, total_questions)
+        logging.info("Question: %s (Question %d/%d)", question, q, total_questions)
 
-        # Hole die relevanten Chunks für die Frage
+        # Get relevant chunks for the question
         relevant_chunks = collection.query(query_texts=[question], n_results=5)
 
-        # Verwende die relevanten Chunks für die Extraktion
+        # Use relevant chunks for extraction
         chunk_texts = relevant_chunks["documents"][0]
         response = openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": extraction_system_prompt},
+                {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
                 {
                     "role": "user",
-                    "content": extraction_prompt.format(
+                    "content": EXTRACTION_PROMPT.format(
                         interview_chunk="\n".join(chunk_texts),
                         interview_question=question,
                         relevant_chunks=chunk_texts,
@@ -337,20 +333,20 @@ class TranscriptAnalyzer:
 
     def extract_information(self) -> None:
         """
-        Extrahiert Informationen aus den Chunks basierend auf den Fragen.
+        Extracts information from chunks based on questions.
         """
         self.data["extracted_information"] = []
 
-        # Multithreaded Fragen-Verarbeitung
+        # Multithreaded question processing
         if self.max_threads > 1:
             logging.info(
-                "🧵 Verwende Multithreading mit %d Threads für die Fragen-Verarbeitung",
+                "Using multithreading with %d threads for question processing",
                 self.max_threads
             )
             with concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.max_threads
             ) as executor:
-                # Erstelle eine Liste von Argumenten für jede Frage
+                # Create a list of arguments for each question
                 question_args = [
                     (
                         question,
@@ -361,14 +357,14 @@ class TranscriptAnalyzer:
                     )
                     for q, question in enumerate(self.questions_df["question"], 1)
                 ]
-                # Verarbeite alle Fragen parallel
+                # Process all questions in parallel
                 self.data["extracted_information"] = list(
                     executor.map(self._process_question, question_args)
                 )
         else:
-            logging.info("🔄 Verwende sequentielle Verarbeitung für Fragen")
-            # Durchlaufe die Fragen und die Chunks und führe eine RAG-basierte
-            # Extraktion von Informationen durch
+            logging.info("Using sequential processing for questions")
+            # Iterate through questions and chunks and perform RAG-based
+            # information extraction
             for q, question in enumerate(self.questions_df["question"], 1):
                 result = self._process_question(
                     (
@@ -381,40 +377,40 @@ class TranscriptAnalyzer:
                 )
                 self.data["extracted_information"].append(result)
 
-        # Speichere die extrahierten Informationen in einer JSON-Datei
+        # Save extracted information to a JSON file
         with open("extracted_information.json", "w", encoding="utf-8") as f:
             json.dump(self.data["extracted_information"], f, ensure_ascii=False)
             logging.info(
-                "💾 Extrahierte Informationen in 'extracted_information.json' gespeichert"
+                "Extracted information saved in 'extracted_information.json'"
             )
 
     def _process_final_answer(self, args: Tuple) -> Dict:
         """
-        Verarbeitet die finale Antwort für eine Frage im Multithreading-Modus.
+        Processes the final answer for a question in multithreading mode.
 
         Args:
-            args: Tuple mit (question, question_index, total_questions, 
+            args: Tuple with (question, question_index, total_questions, 
                   question_info, openai_client)
 
         Returns:
-            Finale Antwort für die Frage
+            Final answer for the question
         """
         question, q, total_questions, question_info, openai_client = args
-        logging.info("🔄 Verarbeite Frage %d/%d: %s", q, total_questions, question)
+        logging.info("Processing question %d/%d: %s", q, total_questions, question)
 
-        # Bereite den Inhalt für diese Frage vor
+        # Prepare content for this question
         question_content = (
             f"Frage: {question_info['question']}\n\n"
             f"Interpretation: {question_info['interpretation']}"
         )
 
-        # Generiere die Antwort für diese einzelne Frage
+        # Generate answer for this single question
         response = openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {
                     "role": "system",
-                    "content": full_format_prompt.format(interview_question=question),
+                    "content": FULL_FORMAT_PROMPT.format(interview_question=question),
                 },
                 {"role": "user", "content": question_content},
             ],
@@ -424,11 +420,11 @@ class TranscriptAnalyzer:
 
         question_answer = response.choices[0].message.content
 
-        # Setze die Generierung fort, falls die Antwort nicht vollständig ist
+        # Continue generation if answer is not complete
         messages_history = [
             {
                 "role": "system",
-                "content": full_format_prompt.format(interview_question=question),
+                "content": FULL_FORMAT_PROMPT.format(interview_question=question),
             },
             {"role": "user", "content": question_content},
             {"role": "assistant", "content": question_answer},
@@ -436,11 +432,11 @@ class TranscriptAnalyzer:
 
         while response.choices[0].finish_reason != "stop":
             logging.info(
-                "🔄 Die Antwort für Frage %d ist noch nicht vollständig, setze fort...",
+                "Answer for question %d is not complete yet, continuing...",
                 q
             )
             messages_history.append(
-                {"role": "user", "content": "Bitte setze deine Analyse fort..."}
+                {"role": "user", "content": "Please continue your analysis..."}
             )
 
             response = openai_client.chat.completions.create(
@@ -457,15 +453,15 @@ class TranscriptAnalyzer:
 
         tokens = len(tiktoken.encoding_for_model(
             "gpt-4o").encode(question_answer))
-        logging.info("✅ Frage %d verarbeitet. Tokens: %d", q, tokens)
+        logging.info("Question %d processed. Tokens: %d", q, tokens)
 
         return {"question": question, "answer": question_answer}
 
     def generate_answers(self) -> None:
         """
-        Generiert Antworten basierend auf den extrahierten Informationen.
+        Generates answers based on extracted information.
         """
-        # Kombiniere die extrahierten Informationen zu einem String
+        # Combine extracted information into a string
         combined_information = "\n\n".join(
             [
                 f"Frage: {item['question']}\n\nInterpretation: {item['interpretation']}"
@@ -475,32 +471,31 @@ class TranscriptAnalyzer:
         tokens = len(tiktoken.encoding_for_model(
             "gpt-4o").encode(combined_information))
         logging.info(
-            "🔢 Anzahl der Tokens in der kombinierten Information: %d",
+            "Number of tokens in combined information: %d",
             tokens
         )
 
         if tokens < 125000:
             logging.info(
-                "✅ Die kombinierte Information passt in das Kontextfenster von gpt-4o"
+                "The combined information fits within gpt-4o's context window"
             )
-            # Verarbeite jede Frage einzeln
+            # Process each question individually
             self.data["final_answers"] = []
 
-            # Multithreaded finale Antworten-Verarbeitung
+            # Multithreaded final answer processing
             if self.max_threads > 1:
                 logging.info(
-                    "🧵 Verwende Multithreading mit %d Threads für die finalen Antworten",
+                    "Using multithreading with %d threads for final answers",
                     self.max_threads
                 )
                 with concurrent.futures.ThreadPoolExecutor(
                     max_workers=self.max_threads
                 ) as executor:
-                    # Erstelle eine Liste von Argumenten für jede Frage
+                    # Create a list of arguments for each question
                     final_args = []
                     for q, question in enumerate(
                             self.questions_df["question"], 1):
-                        # Filtere die extrahierten Informationen für diese
-                        # spezifische Frage
+                        # Filter extracted information for this specific question
                         question_info = next(
                             (
                                 item
@@ -520,7 +515,7 @@ class TranscriptAnalyzer:
                                 )
                             )
 
-                    # Verarbeite alle finalen Antworten parallel
+                    # Process all final answers in parallel
                     if final_args:
                         self.data["final_answers"] = list(
                             executor.map(
@@ -528,10 +523,9 @@ class TranscriptAnalyzer:
                         )
             else:
                 logging.info(
-                    "🔄 Verwende sequentielle Verarbeitung für finale Antworten")
+                    "Using sequential processing for final answers")
                 for q, question in enumerate(self.questions_df["question"], 1):
-                    # Filtere die extrahierten Informationen für diese
-                    # spezifische Frage
+                    # Filter extracted information for this specific question
                     question_info = next(
                         (
                             item
@@ -553,23 +547,23 @@ class TranscriptAnalyzer:
                         )
                         self.data["final_answers"].append(result)
 
-            # Erstelle die Frage-Antwort-Paare
+            # Create question-answer pairs
             self.data["question_answer_pairs"] = [
                 f"Frage: {item['question']}\n\nAntwort: {item['answer']}"
                 for item in self.data["final_answers"]
             ]
 
-            # Kombiniere alle Antworten zu einem Gesamtdokument
-            final_answer = "# Gesamtauswertung des Interviews\n\n"
+            # Combine all answers into a complete document
+            final_answer = "# Complete Interview Analysis\n\n"
             final_answer += (
-                "# Einleitung\n\n"
-                "Dieses Dokument enthält die Auswertung eines Interviews "
-                "basierend auf den gestellten Fragen.\n\n"
+                "# Introduction\n\n"
+                "This document contains the analysis of an interview "
+                "based on the questions asked.\n\n"
             )
-            final_answer += "# Hauptteil\n\n"
+            final_answer += "# Main Section\n\n"
             for item in self.data["final_answers"]:
-                # Entferne eventuell vorhandene Einleitungen und
-                # Schlussfolgerungen aus den Einzelantworten
+                # Remove any existing introductions and
+                # conclusions from individual answers
                 answer_content = item["answer"]
                 answer_content = re.sub(
                     r"# Einleitung.*?(?=## Frage|# Hauptteil)",
@@ -581,82 +575,82 @@ class TranscriptAnalyzer:
                     r"# Schlussfolgerung.*", "", answer_content, flags=re.DOTALL
                 )
 
-                # Füge die bereinigte Antwort zum Gesamtdokument hinzu
+                # Add the cleaned answer to the complete document
                 final_answer += answer_content + "\n\n"
 
             final_answer += (
-                "# Schlussfolgerung\n\n"
-                "Die obige Analyse fasst die wichtigsten Erkenntnisse "
-                "aus dem Interview zusammen."
+                "# Conclusion\n\n"
+                "The analysis above summarizes the key findings "
+                "from the interview."
             )
 
-            # Speichere die Gesamtantwort
+            # Save the complete answer
             with open("final_answer.txt", "w", encoding="utf-8") as f:
                 f.write(final_answer)
 
             tokens = len(tiktoken.encoding_for_model(
                 "gpt-4o").encode(final_answer))
             logging.info(
-                "🔢 Anzahl der Tokens in der finalen Gesamtantwort: %d",
+                "Number of tokens in final complete answer: %d",
                 tokens
             )
             logging.info(
-                "📄 Finale Gesamtantwort in 'final_answer.txt' gespeichert")
+                "Final complete answer saved in 'final_answer.txt'")
         else:
             logging.info(
-                "⚠️ Die kombinierte Information passt nicht in den Kontextfenster von gpt-4o"
+                "The combined information does not fit within gpt-4o's context window"
             )
-            # Implementiere eine Alternative für große Inhalte
-            logging.info("🔄 Verarbeite Antworten in Batches...")
-            # Hier könnte Code für eine Batch-Verarbeitung folgen
+            # Implement an alternative for large content
+            logging.info("Processing answers in batches...")
+            # Code for batch processing could follow here
             self._process_in_batches()
 
     def _process_in_batches(self) -> None:
         """
-        Verarbeitet die Antworten in Batches, wenn die kombinierte Information zu groß ist.
+        Processes answers in batches when combined information is too large.
         """
-        # Implementierung für Batch-Verarbeitung
-        logging.error("⚠️ Batch-Verarbeitung noch nicht implementiert")
+        # Implementation for batch processing
+        logging.error("Batch processing not yet implemented")
 
     def analyze(self, questions_path: str, transcript_path: str) -> List[str]:
         """
-        Führt die vollständige Analyse des Transkripts durch.
+        Performs complete analysis of the transcript.
 
         Args:
-            questions_path: Pfad zur JSON-Datei mit Fragen
-            transcript_path: Pfad zur Textdatei mit dem Transkript
+            questions_path: Path to JSON file with questions
+            transcript_path: Path to text file with the transcript
 
         Returns:
-            Liste der Frage-Antwort-Paare
+            List of question-answer pairs
         """
         logging.info("=" * 50)
-        logging.info("🚀 Starte Transkriptanalyse")
+        logging.info("Starting transcript analysis")
         logging.info("=" * 50)
 
-        # Initialisiere Clients
+        # Initialize clients
         self.initialize_clients()
 
-        # Lade Daten
+        # Load data
         self.load_data(questions_path, transcript_path)
 
-        # Verarbeite Chunks
+        # Process chunks
         self.process_chunks()
 
-        # Extrahiere Informationen
+        # Extract information
         self.extract_information()
 
-        # Generiere Antworten
+        # Generate answers
         self.generate_answers()
 
         logging.info("=" * 50)
-        logging.info("🎉 Transkriptanalyse abgeschlossen")
+        logging.info("Transcript analysis completed")
         logging.info("=" * 50)
 
         return self.data["question_answer_pairs"]
 
 
 if __name__ == "__main__":
-    # Beispiel für die Verwendung der Klasse
+    # Example of using the class
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s")
@@ -668,8 +662,8 @@ if __name__ == "__main__":
         transcript_path="data/sample_transcript.txt",
     )
 
-    logging.info("📊 Anzahl der Frage-Antwort-Paare: %d", len(qa_pairs))
+    logging.info("Number of question-answer pairs: %d", len(qa_pairs))
     if qa_pairs:
-        logging.info("📝 Beispiel für ein Frage-Antwort-Paar:")
-        # Zeige nur die ersten 200 Zeichen
+        logging.info("Example of a question-answer pair:")
+        # Show only the first 200 characters
         logging.info("%s...", qa_pairs[0][:200])

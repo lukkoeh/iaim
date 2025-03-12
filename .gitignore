@@ -4,3 +4,6 @@ final_answer.txt
 answer_*.txt
 chroma_db/
 __pycache__/
+preprocessor_debug.json
+samples/
+.ruff_cache/
