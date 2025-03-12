@@ -27,7 +27,7 @@ IAIM processes interview transcripts using AI to extract meaningful information,
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/iaim.git
+   git clone https://gitlab.ueberbit.de/ueberbit-genai/iaim.git
    cd iaim
    ```
 
@@ -101,9 +101,10 @@ for answer in answers:
 
 ```json
 [
-  "What are the main challenges mentioned in the interview?",
-  "What solutions were proposed?",
-  "What is the interviewee's background and experience?"
+    {"question": "Welche Verantwortungsbereiche umfasst Ihre Tätigkeit in Ihrem Unternehmen?"},
+    {"question": "Wie viele Personen leiten Sie in Ihrer aktuellen Position, und welches Budget verwalten Sie dabei?"},
+    {"question": "An welche Person oder Position berichten Sie in Ihrer Organisation?"}
+    ...
 ]
 ```
 
