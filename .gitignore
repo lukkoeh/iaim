@@ -7,3 +7,5 @@ __pycache__/
 preprocessor_debug.json
 samples/
 .ruff_cache/
+.old/
+.vscode/

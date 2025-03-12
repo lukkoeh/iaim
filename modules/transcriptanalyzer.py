@@ -6,6 +6,9 @@ extracts information, and generates answers to questions. It uses Azure OpenAI
 and ChromaDB for processing and storing data.
 """
 
+# pylint: disable=too-many-instance-attributes
+# pylint: disable=import-error
+
 import json
 import re
 import logging
@@ -32,7 +35,7 @@ from preprocessor import (
     Interview
 )
 
-# pylint: disable-next=too-many-instance-attributes
+
 class TranscriptAnalyzer:
     """
     Class for analyzing transcripts using AI models.
@@ -190,7 +193,8 @@ class TranscriptAnalyzer:
         # Remove speaker marking from text
         clean_text = text
 
-        # Clean the text using OpenAI to remove unnecessary characters and filler words
+        # Clean the text using OpenAI to remove unnecessary characters and
+        # filler words
         clean_text = openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -200,7 +204,8 @@ class TranscriptAnalyzer:
         )
         clean_text = clean_text.choices[0].message.content
 
-        # Generate an initial summary of each chunk and append it to the text with \n\n
+        # Generate an initial summary of each chunk and append it to the text
+        # with \n\n
         summary = openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -227,8 +232,7 @@ class TranscriptAnalyzer:
         if self.max_threads > 1:
             logging.info(
                 "Using multithreading with maximum %d threads for chunk processing",
-                self.max_threads
-            )
+                self.max_threads)
             with concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.max_threads
             ) as executor:
@@ -307,7 +311,8 @@ class TranscriptAnalyzer:
             Extracted information for the question
         """
         question, q, total_questions, collection, openai_client = args
-        logging.info("Question: %s (Question %d/%d)", question, q, total_questions)
+        logging.info("Question: %s (Question %d/%d)",
+                     question, q, total_questions)
 
         # Get relevant chunks for the question
         relevant_chunks = collection.query(query_texts=[question], n_results=5)
@@ -379,7 +384,10 @@ class TranscriptAnalyzer:
 
         # Save extracted information to a JSON file
         with open("extracted_information.json", "w", encoding="utf-8") as f:
-            json.dump(self.data["extracted_information"], f, ensure_ascii=False)
+            json.dump(
+                self.data["extracted_information"],
+                f,
+                ensure_ascii=False)
             logging.info(
                 "Extracted information saved in 'extracted_information.json'"
             )
@@ -389,14 +397,18 @@ class TranscriptAnalyzer:
         Processes the final answer for a question in multithreading mode.
 
         Args:
-            args: Tuple with (question, question_index, total_questions, 
+            args: Tuple with (question, question_index, total_questions,
                   question_info, openai_client)
 
         Returns:
             Final answer for the question
         """
         question, q, total_questions, question_info, openai_client = args
-        logging.info("Processing question %d/%d: %s", q, total_questions, question)
+        logging.info(
+            "Processing question %d/%d: %s",
+            q,
+            total_questions,
+            question)
 
         # Prepare content for this question
         question_content = (
@@ -423,12 +435,10 @@ class TranscriptAnalyzer:
         # Continue generation if answer is not complete
         messages_history = [
             {
-                "role": "system",
-                "content": FULL_FORMAT_PROMPT.format(interview_question=question),
-            },
-            {"role": "user", "content": question_content},
-            {"role": "assistant", "content": question_answer},
-        ]
+                "role": "system", "content": FULL_FORMAT_PROMPT.format(
+                    interview_question=question), }, {
+                "role": "user", "content": question_content}, {
+                    "role": "assistant", "content": question_answer}, ]
 
         while response.choices[0].finish_reason != "stop":
             logging.info(
@@ -464,7 +474,9 @@ class TranscriptAnalyzer:
         # Combine extracted information into a string
         combined_information = "\n\n".join(
             [
-                f"Frage: {item['question']}\n\nInterpretation: {item['interpretation']}"
+                f"Frage: {
+                    item['question']}\n\nInterpretation: {
+                    item['interpretation']}"
                 for item in self.data["extracted_information"]
             ]
         )
@@ -495,7 +507,8 @@ class TranscriptAnalyzer:
                     final_args = []
                     for q, question in enumerate(
                             self.questions_df["question"], 1):
-                        # Filter extracted information for this specific question
+                        # Filter extracted information for this specific
+                        # question
                         question_info = next(
                             (
                                 item
@@ -572,8 +585,10 @@ class TranscriptAnalyzer:
                     flags=re.DOTALL,
                 )
                 answer_content = re.sub(
-                    r"# Schlussfolgerung.*", "", answer_content, flags=re.DOTALL
-                )
+                    r"# Schlussfolgerung.*",
+                    "",
+                    answer_content,
+                    flags=re.DOTALL)
 
                 # Add the cleaned answer to the complete document
                 final_answer += answer_content + "\n\n"
@@ -649,6 +664,8 @@ class TranscriptAnalyzer:
         return self.data["question_answer_pairs"]
 
 
+# NOTE: This is only for testing purposes, the class should be loaded as a
+# MODULE
 if __name__ == "__main__":
     # Example of using the class
     logging.basicConfig(
@@ -658,8 +675,8 @@ if __name__ == "__main__":
 
     analyzer = TranscriptAnalyzer(max_threads=4)
     qa_pairs = analyzer.analyze(
-        questions_path="data/questions.json",
-        transcript_path="data/sample_transcript.txt",
+        questions_path="samples/questions.json",
+        transcript_path="samples/sample_transcript.txt",
     )
 
     logging.info("Number of question-answer pairs: %d", len(qa_pairs))

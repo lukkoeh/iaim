@@ -1,6 +1,16 @@
 repos:
   - repo: local
     hooks:
+      - id: autopep8
+        name: autopep8
+        entry: autopep8
+        language: system
+        types: [python]
+        args:
+          - --in-place
+          - --aggressive
+          - --aggressive
+        
       - id: pylint
         name: pylint
         entry: pylint

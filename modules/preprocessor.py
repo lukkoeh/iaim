@@ -33,6 +33,7 @@ class Interview(BaseModel):
 
 class Preprocessor:
     """Processes interview transcripts with AI and creates structured Interview objects."""
+
     def __init__(self):
         load_dotenv(override=True)
         self.openai_client: AzureOpenAI = AzureOpenAI(
@@ -42,20 +43,22 @@ class Preprocessor:
         )
         self.max_tokens: int = 7000  # Safety limit for tokens
 
-    def _process_sentences(self, paragraph: str, current: dict, parts: list) -> dict:
+    def _process_sentences(self, paragraph: str,
+                           current: dict, parts: list) -> dict:
         """Processes individual sentences of a paragraph.
-        
+
         Args:
             paragraph: Paragraph to be processed
             current: Current chunk and token counter
             parts: List of completed parts
-            
+
         Returns:
             Updated chunk and token counter
         """
         for sentence in re.split(r"(?<=[.!?])\s+", paragraph.strip()):
             s_clean = f"{sentence} "
-            s_tokens = len(tiktoken.encoding_for_model("gpt-4o").encode(s_clean))
+            s_tokens = len(
+                tiktoken.encoding_for_model("gpt-4o").encode(s_clean))
             if current["tokens"] + s_tokens > self.max_tokens:
                 if current["chunk"]:
                     parts.append(current["chunk"])
@@ -68,14 +71,15 @@ class Preprocessor:
     def _split_transcript(self, text: str) -> List[str]:
         """
         Splits the transcript into smaller parts that are within the token limit.
-        
+
         Args:
             text: The complete transcript
-            
+
         Returns:
             List of transcript parts below the token limit
         """
-        if len(tiktoken.encoding_for_model("gpt-4o").encode(text)) <= self.max_tokens:
+        if len(tiktoken.encoding_for_model(
+                "gpt-4o").encode(text)) <= self.max_tokens:
             return [text]
 
         parts = []
@@ -85,7 +89,8 @@ class Preprocessor:
                 continue
 
             paragraph_clean = f"{paragraph.strip()}\n\n"
-            p_tokens = len(tiktoken.encoding_for_model("gpt-4o").encode(paragraph_clean))
+            p_tokens = len(tiktoken.encoding_for_model(
+                "gpt-4o").encode(paragraph_clean))
 
             if p_tokens > self.max_tokens:
                 current = self._process_sentences(paragraph, current, parts)
@@ -101,7 +106,8 @@ class Preprocessor:
 
         return parts
 
-    def _merge_interview_parts(self, interview_parts: List[Interview]) -> Interview:
+    def _merge_interview_parts(
+            self, interview_parts: List[Interview]) -> Interview:
         """
         Merges multiple interview parts into a complete interview.
         Ensures that each speaker appears only once and all snippets
@@ -117,11 +123,17 @@ class Preprocessor:
             return interview_parts[0]
 
         # Take the first interview as a base
-        merged = Interview(transcript="", speakers=[], questions=[], snippets=[])
+        merged = Interview(
+            transcript="",
+            speakers=[],
+            questions=[],
+            snippets=[])
 
         # Collect all transcripts
         all_transcripts = [part.transcript for part in interview_parts]
-        merged.transcript = max(all_transcripts, key=len) if all_transcripts else ""
+        merged.transcript = max(
+            all_transcripts,
+            key=len) if all_transcripts else ""
 
         # Collect all unique speakers
         unique_speakers = set()
@@ -141,17 +153,21 @@ class Preprocessor:
 
         return merged
 
-    def process_part(self, part: str, i: int, transcript_parts: List[str]) -> Interview:
+    def process_part(self, part: str, i: int,
+                     transcript_parts: List[str]) -> Interview:
         """Processes a single part of the transcript and creates an Interview object.
         Args:
             part: Text part of the transcript
             i: Index of the current part
             transcript_parts: List of all transcript parts
-            
+
         Returns:
             Interview object with extracted data
         """
-        logging.info("Preprocessing chunk %d of %d from transcript", i+1, len(transcript_parts))
+        logging.info(
+            "Preprocessing chunk %d of %d from transcript",
+            i + 1,
+            len(transcript_parts))
         return self.openai_client.beta.chat.completions.parse(
             model="gpt-4o",
             messages=[
@@ -160,7 +176,10 @@ class Preprocessor:
                     "content": (
                         "Du bist ein hilfreicher Assistent, der Interview-"
                         "Transkripte vorverarbeitet.\n"
-                        f"Dies ist Teil {i+1} von {len(transcript_parts)} des Transkripts.\n"
+                        f"Dies ist Teil {
+                            i +
+                            1} von {
+                            len(transcript_parts)} des Transkripts.\n"
                         "Extrahiere alle Sprecher, Fragen und Gesprächsabschnitte.\n"
                         "Lasse das Analyse-Feld und das Transkript-Feld leer.\n"
                         "Jedes Statement soll ein extra Snippet sein mit dem jeweiligen Sprecher."
@@ -192,11 +211,11 @@ class Preprocessor:
         return response.choices[0].message.parsed
 
     def ai_preprocess(
-        self,
-        text: str,
-        augmented_questions: List[str] = None,
-        use_multithreading: Optional[bool] = False,
-        threads: Optional[int] = 1) -> Interview:
+            self,
+            text: str,
+            augmented_questions: List[str] = None,
+            use_multithreading: Optional[bool] = False,
+            threads: Optional[int] = 1) -> Interview:
         """
         Processes a transcript with AI support and creates an Interview object.
         Splits large transcripts to avoid token limits.
@@ -210,7 +229,8 @@ class Preprocessor:
         Returns:
             An Interview object with structured data
         """
-        if len(tiktoken.encoding_for_model("gpt-4o").encode(text)) <= self.max_tokens:
+        if len(tiktoken.encoding_for_model(
+                "gpt-4o").encode(text)) <= self.max_tokens:
             result = self._process_small_transcript(text)
         else:
             # For large transcripts: Split and process separately
