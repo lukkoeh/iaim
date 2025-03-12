@@ -2,6 +2,7 @@
 Dieses Modul verarbeitet große Transkripte in kleinere Teile und verarbeitet sie mit KI.
 Die Ergebnisse werden in ein Interview-Objekt umgewandelt.
 Das Modul wurde mithilfe von Cursor refactored, um ein 10/10 pylint Ergebnis zu erhalten.
+Pre-Commit Hooks werden empfohlen.
 """
 
 import os
