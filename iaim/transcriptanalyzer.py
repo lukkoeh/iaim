@@ -23,16 +23,16 @@ import chromadb
 # pylint: disable-next=no-member
 import chromadb.utils.embedding_functions as embed_fns
 import chromadb.errors as chroma_errors
-from static.prompts import (
+from .preprocessor import (
+    Preprocessor,
+    Interview
+)
+from .prompts import (
     SUMMARY_PROMPT,
     CLEANING_PROMPT,
     EXTRACTION_SYSTEM_PROMPT,
     EXTRACTION_PROMPT,
     FULL_FORMAT_PROMPT
-)
-from preprocessor import (
-    Preprocessor,
-    Interview
 )
 
 

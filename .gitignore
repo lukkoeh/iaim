@@ -9,3 +9,5 @@ samples/
 .ruff_cache/
 .old/
 .vscode/
+dist/
+test.py
