@@ -1,6 +1,6 @@
 [project]
 name = "iaim"
-version = "1.0.5"
+version = "1.0.6"
 description = "A module providing functionality to preprocess and analyze interview-transcripts"
 authors = [
     {name = "Lukas Köhler",email = "lukas.koehler@ueberbit.de"}
@@ -13,7 +13,11 @@ dependencies = [
     "openai (>=1.66.5,<2.0.0)",
     "python-dotenv (>=1.0.1,<2.0.0)",
     "tiktoken (>=0.9.0,<0.10.0)",
-    "chromadb (>=0.6.3,<0.7.0)"
+    "chromadb (>=0.6.3,<0.7.0)",
+    "pandas (>=2.2.3,<3.0.0)",
+    "pylint (>=3.3.5,<4.0.0)",
+    "autopep8 (>=2.3.2,<3.0.0)",
+    "pre-commit (>=4.2.0,<5.0.0)"
 ]
 
 
